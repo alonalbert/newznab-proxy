@@ -25,6 +25,8 @@ import org.redundent.kotlin.xml.Node
 import org.redundent.kotlin.xml.xml
 
 private const val HOST = "binsearch.info"
+private const val GET_NZB_URL = "https://$HOST/fcgi/nzb.fcgi"
+private const val GET_NZB_DATA = "%s=on&action=nzb"
 
 class BinsearchHandler : HttpHandler {
   companion object {
@@ -69,9 +71,15 @@ class BinsearchHandler : HttpHandler {
     Logger.log("URI: %s", uri)
     val parameters = QueryParameters.getParameters(uri.query)
     val action = parameters["t"]
-    if (action == "caps") {
-      return CAPS
+
+    return when (action) {
+      "caps" -> CAPS
+      "getnzb" -> loadNzb(parameters["id"]!!)
+      else -> loadRss(parameters, uri)
     }
+  }
+
+  private fun loadRss(parameters: MutableMap<String, String>, uri: URI): String {
     val tvDbId = parameters.remove("tvdbid")
     var query: String?
 
@@ -104,9 +112,16 @@ class BinsearchHandler : HttpHandler {
       "/", QueryParameters.getQuery(parameters), uri.fragment
     )
     Logger.log("New uri: %s", newUri)
-    val body = loadUri(newUri)
-    val rss = generateRss(body, uri.toString())
-    return rss
+    return generateRss(loadUri(newUri), uri.toString())
+  }
+
+  private fun loadNzb(id: String): String {
+    return httpClient.send(
+      HttpRequest.newBuilder(URI.create(GET_NZB_URL))
+        .POST(HttpRequest.BodyPublishers.ofString(GET_NZB_DATA.format(id)))
+        .build(),
+      HttpResponse.BodyHandlers.ofString()
+    ).body()
   }
 
   private fun loadUri(newUri: URI): String {
@@ -174,7 +189,7 @@ class BinsearchHandler : HttpHandler {
         }
 
         element("enclosure") {
-          attribute("url", "?id=${info.id}")
+          attribute("url", "?t=getnzb&id=${info.id}")
           attribute("length", info.size)
           attribute("type", "application/x-nzb")
         }
