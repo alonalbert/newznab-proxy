@@ -5,15 +5,20 @@ import com.newznabproxy.tvdb.TvDbApi
 import com.newznabproxy.util.Logger
 import com.newznabproxy.util.QueryParameters
 import com.newznabproxy.util.SeriesHelper
-import com.newznabproxy.util.SizeUnit
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpHandler
+import java.io.PrintStream
 import java.net.URI
 import java.net.URLEncoder
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
-import java.nio.charset.Charset
+import kotlin.text.RegexOption.IGNORE_CASE
+import kotlin.text.RegexOption.MULTILINE
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.runBlocking
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 import org.redundent.kotlin.xml.Node
@@ -23,8 +28,10 @@ private const val HOST = "binsearch.info"
 
 class BinsearchHandler : HttpHandler {
   companion object {
-    private val RE_ITEM_NAME = Regex("^\\[ (.*) ]")
-    private val RE_ITEM_SIZE = Regex("size (\\d+) ([a-z]+)", RegexOption.IGNORE_CASE)
+    private val NFO_RE_OPTIONS = setOf(IGNORE_CASE, MULTILINE)
+
+    private val RE_COMPLETE_NAME = Regex("^Complete name +: (.*)$", NFO_RE_OPTIONS)
+    private val RE_FILE_SIZE = Regex("^File size +: ([0-9.]+) ([a-z]+)$", NFO_RE_OPTIONS)
   }
 
   private val httpClient = HttpClient.newHttpClient()
@@ -42,54 +49,64 @@ class BinsearchHandler : HttpHandler {
     try {
       val responseHeaders = exchange.responseHeaders
       responseHeaders.add("Content-Type", "application/xml")
-
-      val uri = exchange.requestURI
-      Logger.log("URI: %s", uri)
-      val parameters = QueryParameters.getParameters(uri.query)
-      val action = parameters["t"]
-      if (action == "caps") {
-        exchange.sendResponseHeaders(200, CAPS.length.toLong())
-        exchange.responseBody.use { out -> out.write(CAPS.toByteArray()) }
-        return
-      }
-      val tvDbId = parameters.remove("tvdbid")
-      var query: String
-      if (tvDbId != null) {
-        query = TvDbApi.getSeriesName(tvDbId)
-        query += " " + SeriesHelper.getEpisodeString(parameters)
-        parameters.remove("season")
-        parameters.remove("ep")
-        parameters["q"] = URLEncoder.encode(query, "utf-8")
-      } else {
-        query = parameters["q"] ?: "foobar"
-      }
-      val max = parameters["limit"] ?: "100"
-      parameters.clear()
-
-      parameters["q"] = query
-      parameters["max"] = max
-      parameters["postdate"] = "date"
-
-      val newUri = URI(
-        "https", uri.userInfo, HOST, 443,
-        "/", QueryParameters.getQuery(parameters), uri.fragment
-      )
-      Logger.log("New uri: %s", newUri)
-      val body = loadUri(newUri)
-      val rss = generateRss(body, uri.toString())
-      Logger.log("%s", rss)
       exchange.sendResponseHeaders(200, 0)
-      exchange.responseBody.use { out ->
-        val writer = out.bufferedWriter(Charset.defaultCharset())
-        writer.write(rss)
-        writer.flush()
+      PrintStream(exchange.responseBody, true).use { out ->
+        val response = generateResponse(exchange.requestURI)
+        Logger.log(response)
+        out.println(response)
       }
     } catch (e: Throwable) {
       Logger.log(e, "BinsearchHandler error")
       exchange.sendResponseHeaders(500, 0)
-      exchange.responseBody.use { out -> out.write("Error".toByteArray()) }
+      PrintStream(exchange.responseBody, true).use { out ->
+        out.println("Internal error:")
+        e.printStackTrace(out)
+      }
     }
+  }
 
+  fun generateResponse(uri: URI): String {
+    Logger.log("URI: %s", uri)
+    val parameters = QueryParameters.getParameters(uri.query)
+    val action = parameters["t"]
+    if (action == "caps") {
+      return CAPS
+    }
+    val tvDbId = parameters.remove("tvdbid")
+    var query: String?
+
+    if (tvDbId != null) {
+      query = URLEncoder.encode(TvDbApi.getSeriesName(tvDbId), "utf-8")
+    } else {
+      // Binsearch mush have some query - Sonarr sends no query when testing
+      query = parameters["q"]
+    }
+    if (query == null) {
+      // Sonarr sends a test URI with no query
+      return generateRss(
+        listOf(ItemInfo("fake-id", "Fake Title", 100, "1-Jan-2000")),
+        uri.toString()
+      )
+    }
+    val episodeString = SeriesHelper.getEpisodeString(parameters)
+    if (episodeString != null) {
+      query += "+$episodeString"
+    }
+    val max = parameters["limit"] ?: "100"
+    parameters.clear()
+
+    parameters["q"] = query
+    parameters["max"] = max
+    parameters["postdate"] = "date"
+
+    val newUri = URI(
+      "https", uri.userInfo, HOST, 443,
+      "/", QueryParameters.getQuery(parameters), uri.fragment
+    )
+    Logger.log("New uri: %s", newUri)
+    val body = loadUri(newUri)
+    val rss = generateRss(body, uri.toString())
+    return rss
   }
 
   private fun loadUri(newUri: URI): String {
@@ -102,9 +119,15 @@ class BinsearchHandler : HttpHandler {
 //    if (true) {
 //      return GEN
 //    }
-    val doc = Jsoup.parse(html)
-    val items = doc.select("table[id=r2] tr")
-    val xml = xml("rss") {
+
+    return runBlocking {
+      val items = parseItems(html)
+      generateRss(items, uri)
+    }
+  }
+
+  private fun generateRss(items: List<ItemInfo>, uri: String): String {
+    return xml("rss") {
       namespace("atom", "http://www.w3.org/2005/Atom")
       namespace("newznab", "http://www.newznab.com/DTD/2010/feeds/attributes/")
       attribute("version", "2.0")
@@ -123,63 +146,40 @@ class BinsearchHandler : HttpHandler {
         element("link") {
           text("https://binsearch.info")
         }
+
         element("newznab:response") {
           attribute("offset", 0)
-          attribute("total", items.size - 1)
+          attribute("total", items.size)
         }
-        items.drop(1).forEach { item ->
-          handleItem(item)
+        items.forEach {
+          addNode(getItemElement(it))
         }
       }
-    }
-
-    return xml.toString(false)
+    }.toString(false)
   }
 
-  private fun Node.handleItem(item: Element) {
-    val title = getTitle(item)
-    val size = getSize(item)
-    val id = getId(item)
-    val date = getDate(item)
+  private fun getItemElement(info: ItemInfo): Node {
+    return xml("root") {
+      element("item") {
+        element("title") {
+          text(info.title)
+        }
+        element("guid") {
+          attribute("isPermaLink", false)
+          text(info.id)
+        }
 
-    if (title == null || size < 0 || id == null || date == null) {
-      return
-    }
+        element("pubDate") {
+          text(info.date)
+        }
 
-    element("item") {
-      element("title") {
-        text(title)
+        element("enclosure") {
+          attribute("url", "?id=${info.id}")
+          attribute("length", info.size)
+          attribute("type", "application/x-nzb")
+        }
       }
-      element("guid") {
-        attribute("isPermaLink", false)
-        text(id)
-      }
-
-      element("pubDate") {
-        text(date)
-      }
-
-      element("enclosure") {
-        attribute("url", "?id=$id")
-        attribute("type", "application/x-nzb")
-      }
-    }
-  }
-
-  private fun getTitle(item: Element): String? {
-    val text = item.select("span[class=s]").text() ?: return null
-    return RE_ITEM_NAME.find(text)?.groups?.get(1)?.value ?: text
-  }
-
-  private fun getSize(item: Element): Int {
-    val container = item.select("span[class=d]") ?: return -1
-    val textNodes = container.textNodes()
-    if (textNodes.size == 0) {
-      return -1
-    }
-    val match = RE_ITEM_SIZE.find("size 123 GB, parts") ?: return -1
-    val size = match.groups[1]!!.value.toInt()
-    return SizeUnit.valueOf(match.groups[2]!!.value).getSize(size)
+    }.children[0] as Node
   }
 
   private fun getId(item: Element): String? {
@@ -189,5 +189,34 @@ class BinsearchHandler : HttpHandler {
   private fun getDate(item: Element): String? {
     val tds = item.select("td")
     return tds?.last()?.text()
+  }
+
+  private suspend fun parseItems(html: String): List<ItemInfo> {
+    val doc = Jsoup.parse(html)
+    val items = doc.select("table[id=r2] tr")
+    return items.drop(1).map { item ->
+      GlobalScope.async {
+        loadItemInfo(item)
+      }
+    }.awaitAll()
+      .filterNotNull()
+  }
+
+  private fun loadItemInfo(item: Element): ItemInfo? {
+    if (item.select("a:contains(collection)") == null) {
+      return null
+    }
+    val id = getId(item) ?: return null
+    val date = getDate(item) ?: return null
+
+    val nfoLink = item.select("a[class=submodal]")?.attr("href") ?: return null
+    val nfo = Jsoup.parse(loadUri(URI("https://$HOST$nfoLink"))).body().text()
+
+    val title = (RE_COMPLETE_NAME.find(nfo) ?: return null).groups[1]!!.value
+
+    val sizeGroups = (RE_FILE_SIZE.find(nfo) ?: return null).groups
+    val size = SizeUnit.valueOf(sizeGroups[2]!!.value).getSize(sizeGroups[1]!!.value.toFloat())
+
+    return ItemInfo(id, title, size, date)
   }
 }

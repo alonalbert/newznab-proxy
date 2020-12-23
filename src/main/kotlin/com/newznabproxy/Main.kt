@@ -1,6 +1,6 @@
 package com.newznabproxy
 
-import com.newznabproxy.handlers.BinsearchHandler
+import com.newznabproxy.handlers.binsearch.BinsearchHandler
 import com.newznabproxy.handlers.tvsearch.TvSearchHandler
 import com.newznabproxy.util.Logger
 import com.sun.net.httpserver.HttpServer
@@ -21,8 +21,8 @@ fun main(args: Array<String>) {
   server.createContext("/tvsearch", TvSearchHandler())
   server.createContext("/binsearch", BinsearchHandler())
   Logger.log("Starting server on port %s", port)
-  if (true) {
-    return
-  }
+//  if (true) {
+//    return
+//  }
   server.start()
 }
