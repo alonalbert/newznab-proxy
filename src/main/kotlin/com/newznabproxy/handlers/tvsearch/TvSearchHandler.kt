@@ -1,4 +1,4 @@
-package com.newznabproxy.handlers
+package com.newznabproxy.handlers.tvsearch
 
 import com.newznabproxy.tvdb.TvDbApi
 import com.newznabproxy.util.Logger

@@ -1,4 +1,4 @@
-package com.newznabproxy.handlers
+package com.newznabproxy.handlers.binsearch
 
 import CAPS
 import com.newznabproxy.tvdb.TvDbApi

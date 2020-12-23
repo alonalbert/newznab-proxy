@@ -1,7 +1,7 @@
 package com.newznabproxy
 
 import com.newznabproxy.handlers.BinsearchHandler
-import com.newznabproxy.handlers.TvSearchHandler
+import com.newznabproxy.handlers.tvsearch.TvSearchHandler
 import com.newznabproxy.util.Logger
 import com.sun.net.httpserver.HttpServer
 import java.io.IOException
