@@ -1,5 +1,6 @@
 package com.newznabproxy
 
+import com.newznabproxy.handlers.BinsearchHandler
 import com.newznabproxy.handlers.TvSearchHandler
 import com.newznabproxy.util.Logger
 import com.sun.net.httpserver.HttpServer
@@ -17,10 +18,11 @@ fun main(args: Array<String>) {
       return
     }
   server.executor = Executors.newFixedThreadPool(10)
-  server.createContext(
-    "/tvsearch",
-    TvSearchHandler()
-  )
+  server.createContext("/tvsearch", TvSearchHandler())
+  server.createContext("/binsearch", BinsearchHandler())
   Logger.log("Starting server on port %s", port)
+  if (true) {
+    return
+  }
   server.start()
 }

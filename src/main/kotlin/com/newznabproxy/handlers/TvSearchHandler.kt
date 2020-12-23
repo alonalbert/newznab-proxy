@@ -1,12 +1,14 @@
 package com.newznabproxy.handlers
 
 import com.newznabproxy.tvdb.TvDbApi
-import com.newznabproxy.util.Logger.log
+import com.newznabproxy.util.Logger
 import com.newznabproxy.util.QueryParameters.getParameters
 import com.newznabproxy.util.QueryParameters.getQuery
+import com.newznabproxy.util.SeriesHelper
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpHandler
 import java.net.URI
+import java.net.URLEncoder
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse.BodyHandlers
@@ -17,26 +19,21 @@ internal class TvSearchHandler : HttpHandler {
   override fun handle(exchange: HttpExchange) {
     try {
       val uri = exchange.requestURI
-      log("URI: %s", uri)
+      Logger.log("URI: %s", uri)
       val parameters = getParameters(uri.query)
       val host = uri.path.split("/").toTypedArray()[2]
       val action = parameters["t"]
-      if (action != null && action.endsWith("search")) {
+      if (action.equals("tvsearch")) {
         parameters["t"] = "search"
       }
       parameters.remove("rid")
       val tvDbId = parameters.remove("tvdbid")
       if (tvDbId != null) {
-        var query = TvDbApi.getSeriesName(tvDbId).replace(' ', '+')
-        val season: String? = parameters.remove("season")
-        if (season != null) {
-          query += "+s$season"
-          val episode: String? = parameters.remove("ep")
-          if (episode != null) {
-            query += "e%02d".format(episode.toInt())
-          }
-          parameters.put("q", query)
-        }
+        var query = TvDbApi.getSeriesName(tvDbId)
+        query += " " + SeriesHelper.getEpisodeString(parameters)
+        parameters.remove("season")
+        parameters.remove("ep")
+        parameters.put("q", URLEncoder.encode(query, "utf-8"))
       }
       val categories = parameters["cat"]
       if (categories != null) {
@@ -46,7 +43,7 @@ internal class TvSearchHandler : HttpHandler {
         "https", uri.userInfo, host, 443,
         "/api", getQuery(parameters), uri.fragment
       )
-      log("New uri: %s", newUri)
+      Logger.log("New uri: %s", newUri)
       val request = HttpRequest.newBuilder(newUri).build()
       val response = httpClient
         .send(request, BodyHandlers.ofString())
@@ -56,8 +53,7 @@ internal class TvSearchHandler : HttpHandler {
       exchange.sendResponseHeaders(200, body.length.toLong())
       exchange.responseBody.use { out -> out.write(body.toByteArray()) }
     } catch (e: Throwable) {
-      // TODO: 12/21/20: Handle error
-      e.printStackTrace()
+      Logger.log(e, "TvSearchHandler error")
     }
   }
 }

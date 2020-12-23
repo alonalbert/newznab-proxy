@@ -13,6 +13,8 @@ private const val API_PIN = "1234"
 private const val URL_BASE = "https://api4.thetvdb.com/v4"
 private const val URL_AUTHENTICATE = "$URL_BASE/login"
 private const val URL_SERIES = "$URL_BASE/series/%s"
+// 12/21/20 20:26:18
+private const val OLD_TOKEN = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJhcGlrZXkiOiIwYTc0YTNjNi0xMzg4LTRkZmMtOWRmNS03NjUzMTUwODA2MmYiLCJjb21tdW5pdHlfc3VwcG9ydGVkIjpmYWxzZSwiZXhwIjoxNjA5MTc5OTc4LCJpZCI6IjAiLCJwaW4iOiIxMjM0In0.mEDX_kcNQ3u2Uv-pLkPkiG-M0r91hVziFX5BB8QyVpiwtkILAFacwPlSV3sLLtBGuFTRRpFMbvASDpxxjDFOycn_Rc6xuc2NfvQECkCTbnZXtlfCFi9fT4fey8IN3XyDtrI-lo9tkAJbFStdaGrPHW6JzO1oNAcFc_UKWqguk5TWRB-chqpaJqBlSUGwhJorwnuRM077xRQqsomwZa1xu33soOVzhSKbrJIqVvcA2Y8pBjAwvHDbwTVev6SYczaRTbqBhRJU9Uv72dyRAejKV4cxaFoMg-qYzFpUTBTB6SB8FpbcJJommzBAjvULzazua1iR98thrVyEa5_21Uv2TlsO2_y-gMOTuR8qrWxVi3klgwSEmL1VAm00zNIC8A4t5Cw4qiGTeYutlhdqp98VG8DTncvVbDzhJnUv4o0snl70FcqtQd8OLuOMOtofN-AWgt_AlAGIRWN8C7HMJ8WhQfs457lMD9bOzilQnRWCvugHvsd4658Rm-QN5qUUrlx0kxSBSxjUs2KlpkzHNxlt4huq1aqC1sgQlQpMNxEZMJvIH2Sq3l5xHTmMF2j9bHnjOtiTqAyLRc5V9acv2OafNMKRT1v_uL5zsT8ATRbEy2BBwepu1O_VGivO9ST96sH9ML8cJiEazQ8yc-XoKigU_szu01ifvHgmB4oakZxUt2w"
 
 object TvDbApi {
 
@@ -34,7 +36,7 @@ object TvDbApi {
     )
     val loginResult = gson.fromJson(response.body(), LoginResult::class.java)
     sessionToken = loginResult.data.token
-
+    sessionToken = OLD_TOKEN
   }
 
   fun getSeriesName(id: String): String {
